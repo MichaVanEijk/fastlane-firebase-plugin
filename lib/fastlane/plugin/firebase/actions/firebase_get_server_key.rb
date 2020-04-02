@@ -1,5 +1,9 @@
 module Fastlane
   module Actions
+    module SharedValues
+      FIREBASE_SERVER_KEY = :FIREBASE_GET_SERVER_KEY_KEY
+    end
+
     class FirebaseGetServerKeyAction < Action
       
       def self.run(params)
@@ -12,8 +16,9 @@ module Fastlane
 
         # Add  team
         server_key = api.get_server_key(project["projectNumber"])
+        Actions.lane_context[SharedValues::FIREBASE_SERVER_KEY] = server_key
 
-        UI.success "Successfuly found of server key #{server_key}"
+        UI.success "Successfuly found of server key #{server_key['token'][0]['token']}"
       end
 
       def self.description

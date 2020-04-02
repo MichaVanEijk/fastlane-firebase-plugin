@@ -375,6 +375,11 @@ module Fastlane
           "v1/projects/#{project_number}/apiKeys/#{api_key}", :patch, payload, Hash.new, "updateMask=#{update_mask}"
         )
       end
+
+      def get_server_key(project_number) 
+				parameters = {}
+				json = request_json("v1/projects/#{project_number}:getIidTokens", :post, parameters)
+      end
 		end
 	end
 end

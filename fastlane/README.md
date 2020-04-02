@@ -69,6 +69,16 @@ xcode-select --install
     )
 ```
 
+### firebase_get_server_key
+
+```
+    firebase_get_server_key(
+      project_number: "project-name-or-number",
+      username: ENV['GOOGLE_USERNAME'],
+      password: ENV['GOOGLE_PASSWORD'],
+    )
+```
+
 ----
 
 This README.md is auto-generated and will be re-generated every time [fastlane](https://fastlane.tools) is run.
