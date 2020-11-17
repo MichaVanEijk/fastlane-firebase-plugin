@@ -1,3 +1,5 @@
+require 'base64'
+
 module Fastlane
   module Actions
     class FirebaseAddClientAction < Action
@@ -36,10 +38,9 @@ module Fastlane
 
         if params[:download_config] then
           #Download config
-          config = api.download_config_file(project["projectNumber"], client["clientId"])
-          path = File.join(params[:output_path], params[:output_name] || config.filename)
-          config.save!(path)
-
+          config = api.download_config_file(project["projectNumber"], client["clientId"], client['mobilesdkAppId'])
+          path = File.join(params[:output_path], params[:output_name] || config['configFilename'])
+          File.open(path, 'w+') { |f| f.write(Base64.decode64(config['configFileContents'])) }
           UI.success "Successfuly saved config at #{path}"
         end
 

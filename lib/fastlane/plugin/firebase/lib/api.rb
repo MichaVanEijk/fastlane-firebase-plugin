@@ -1,373 +1,371 @@
 module Fastlane
   module Firebase
-  	class Api 
-			class LoginError < StandardError 
-			end
+    class Api 
+      class LoginError < StandardError 
+      end
 
-			class BadRequestError < StandardError
-				attr_reader :code
- 				def initialize(msg, code)
-			    @code = code
-			    super(msg)
-			  end
-			end
+      class BadRequestError < StandardError
+        attr_reader :code
+        def initialize(msg, code)
+          @code = code
+          super(msg)
+        end
+      end
 
-			require 'mechanize'
-			require 'digest/sha1'
-			require 'json'
-			require 'cgi'
-		
-			def initialize(email, password)
-				@agent = Mechanize.new
-				@base_url = "https://console.firebase.google.com"
-				@sdk_url = "https://mobilesdk-pa.clients6.google.com/"
-				@login_url = "https://accounts.google.com/ServiceLogin"
+      require 'mechanize'
+      require 'digest/sha1'
+      require 'json'
+      require 'cgi'
+
+      def initialize(email, password)
+        @agent = Mechanize.new
+        @base_url = "https://console.firebase.google.com"
+        @sdk_url = "https://mobilesdk-pa.clients6.google.com/"
+        @firebase_url = "https://firebase.clients6.google.com"
+        @login_url = "https://accounts.google.com/ServiceLogin"
         @apikey_url = "https://apikeys.clients6.google.com/"
 
-				login(email, password)
-			end
+        login(email, password)
+      end
 
-			def login(email, password)
-				UI.message "Logging in to Google account #{email}"
+      def login(email, password)
+        UI.message "Logging in to Google account #{email}"
 
- 				# Load cookie from ENV into file if is set
- 				if !ENV["FIREBASE_COOKIE"].nil? then
- 					File.open('.cookies.yml', 'w') { |file| file.write(ENV["FIREBASE_COOKIE"]) }
- 				end
+        # Load cookie from ENV into file if is set
+        if !ENV["FIREBASE_COOKIE"].nil? then
+          File.open('.cookies.yml', 'w') { |file| file.write(ENV["FIREBASE_COOKIE"]) }
+        end
 
- 				# Try to load cookie from file
-				begin
-					@agent.cookie_jar.load '.cookies.yml'
-					UI.message "Cookies found!"
+        # Try to load cookie from file
+        begin
+          @agent.cookie_jar.load '.cookies.yml'
+          UI.message "Cookies found!"
 
-					page = @agent.get(@base_url)
-				rescue
-					UI.message "Cookies not found, trying to login"
+          page = @agent.get(@base_url)
+        rescue
+          UI.message "Cookies not found, trying to login"
 
-					page = @agent.get("#{@login_url}?passive=1209600&osid=1&continue=#{@base_url}/&followup=#{@base_url}/")
-				
-					#First step - email
-					google_form = page.form()
-					google_form.Email = email
+          page = @agent.get("#{@login_url}?passive=1209600&osid=1&continue=#{@base_url}/&followup=#{@base_url}/")
 
-					#Send
-					page = @agent.submit(google_form, google_form.buttons.first)
-					
-					#Second step - password
-					google_form = page.form()
-					google_form.Passwd = password
+          #First step - email
+          google_form = page.form()
+          google_form.Email = email
 
-					#Send
-					page = @agent.submit(google_form, google_form.buttons.first)
-				end
+          #Send
+          page = @agent.submit(google_form, google_form.buttons.first)
 
-				while page do
-					if extract_api_key(page) then
-						UI.success "Successfuly logged in"
-						return true
-					else
+          #Second step - password
+          google_form = page.form()
+          google_form.Passwd = password
 
-						if error = page.at("#errormsg_0_Passwd") then
-							message = error.text.strip
-						elsif page.xpath("//div[@class='captcha-img']").count > 0 then
-							page = captcha_challenge(page)
-							next
-						elsif page.form.action.include? "/signin/challenge" then
-							page = signin_challenge(page)
-							next
-						else 
-							message = "Unknown error"
-						end
-						raise LoginError, "Login failed: #{message}"
-					end 
+          #Send
+          page = @agent.submit(google_form, google_form.buttons.first)
+        end
 
-					end
-			end
+        while page do
+          if extract_api_key(page) then
+            UI.success "Successfuly logged in"
+            return true
+          else
 
-			def extract_api_key(page) 
-				#Find api key in javascript
-				match = page.search("script").text.scan(/\\x22api-key\\x22:\\x22(.*?)\\x22/)
-				if match.count == 1 then
-					@api_key = match[0][0]
-					@authorization_headers = create_authorization_headers()
-					return true
-				end
+            if error = page.at("#errormsg_0_Passwd") then
+              message = error.text.strip
+            elsif page.xpath("//div[@class='captcha-img']").count > 0 then
+              page = captcha_challenge(page)
+              next
+            elsif page.form.action.include? "/signin/challenge" then
+              page = signin_challenge(page)
+              next
+            else 
+              message = "Unknown error"
+            end
+            raise LoginError, "Login failed: #{message}"
+          end 
 
-				return false
-			end
+        end
+      end
 
-			def captcha_challenge(page)
-				if UI.confirm "To proceed you need to fill in captcha. Do you want to download captcha image?" then
-					img_src = page.xpath("//div[@class='captcha-img']/img").attribute("src").value
-					image = @agent.get(img_src)
-					if image != nil then
-						UI.success "Captcha image downloaded"
-					else 
-						UI.crash! "Failed to download captcha image"
-					end
+      def extract_api_key(page) 
+        #Find api key in javascript
+        match = page.search("script").text.scan(/\\x22api-key\\x22:\\x22(.*?)\\x22/)
+        if match.count == 1 then
+          @api_key = match[0][0]
+          @authorization_headers = create_authorization_headers()
+          return true
+        end
 
-					file = Tempfile.new(["firebase_captcha_image", ".jpg"])
-					path = file.path 
-					
-					image.save!(path)
+        return false
+      end
 
-					UI.success "Captcha image saved at #{path}"
+      def captcha_challenge(page)
+        if UI.confirm "To proceed you need to fill in captcha. Do you want to download captcha image?" then
+          img_src = page.xpath("//div[@class='captcha-img']/img").attribute("src").value
+          image = @agent.get(img_src)
+          if image != nil then
+            UI.success "Captcha image downloaded"
+          else 
+            UI.crash! "Failed to download captcha image"
+          end
 
-					if UI.confirm "Preview image?" then 
-						if system("qlmanage -p #{path} >& /dev/null &") != true && system("open #{path} 2> /dev/null") != true then
-							UI.error("Unable to find program to preview the image, open it manually")
-						end
-					end
+          file = Tempfile.new(["firebase_captcha_image", ".jpg"])
+          path = file.path 
 
-					captcha = UI.input "Enter captcha (case insensitive):"
-					password = UI.password "Re-enter password:"
+          image.save!(path)
 
-					captcha_form = page.form()
+          UI.success "Captcha image saved at #{path}"
 
-					captcha_form.logincaptcha = captcha
-					captcha_form.Passwd = password
+          if UI.confirm "Preview image?" then 
+            if system("qlmanage -p #{path} >& /dev/null &") != true && system("open #{path} 2> /dev/null") != true then
+              UI.error("Unable to find program to preview the image, open it manually")
+            end
+          end
 
-					page = @agent.submit(captcha_form, captcha_form.buttons.first)
-					return page
-				else 
-					return nil
-				end
-				
-			end
-			
-			def signin_challenge(page)
-				UI.header "Sign-in challenge"
+          captcha = UI.input "Enter captcha (case insensitive):"
+          password = UI.password "Re-enter password:"
 
-				form_id = "challenge"
-				form = page.form_with(:id => form_id)
-				type = (form["challengeType"] || "-1").to_i
+          captcha_form = page.form()
 
-				# Two factor verification SMS
-				if type == 9 || type == 6 then
-					div = page.at("##{form_id} div")
-					if div != nil then 
-						UI.important div.xpath("div[1]").text
-						UI.important div.xpath("div[2]").text
-					end
-					
-					prefix = type == 9 ? " G-" : ""
-					code = UI.input "Enter code#{prefix}:"
-					form.Pin = code
-					page = @agent.submit(form, form.buttons.first)
-					return page
-				elsif type == 4 then 
-					UI.user_error! "Google prompt is not supported as a two-step verification"
-				else
-					html = page.at("##{form_id}").to_html
-					UI.user_error! "Unknown challenge type \n\n#{html}"
-				end
+          captcha_form.logincaptcha = captcha
+          captcha_form.Passwd = password
 
-				return nil
-			end
+          page = @agent.submit(captcha_form, captcha_form.buttons.first)
+          return page
+        else 
+          return nil
+        end
 
-			def generate_sapisid_hash(time, sapisid, origin) 
-				to_hash = time.to_s + " " + sapisid + " " + origin.to_s
-				
-				hash = Digest::SHA1.hexdigest(to_hash)
-				sapisid_hash = time.to_s + "_" + hash
+      end
 
-				sapisid_hash
-			end
+      def signin_challenge(page)
+        UI.header "Sign-in challenge"
 
-			def create_authorization_headers 
-				@agent.cookie_jar.save_as '.cookies.yml', :session => true, :format => :yaml
-				cookie = @agent.cookie_jar.jar["google.com"]["/"]["SAPISID"]
-				sapisid = cookie.value
-				origin = @base_url
-				time = Time.now.to_i
+        form_id = "challenge"
+        form = page.form_with(:id => form_id)
+        type = (form["challengeType"] || "-1").to_i
 
-				sapisid_hash = generate_sapisid_hash(time, sapisid, origin)
+        # Two factor verification SMS
+        if type == 9 || type == 6 then
+          div = page.at("##{form_id} div")
+          if div != nil then 
+            UI.important div.xpath("div[1]").text
+            UI.important div.xpath("div[2]").text
+          end
 
-				cookies = @agent.cookie_jar.jar["google.com"]["/"].merge(@agent.cookie_jar.jar["console.firebase.google.com"]["/"])
-				cookie_header = cookies.map { |el, cookie| "#{el}=#{cookie.value}" }.join(";")
+          prefix = type == 9 ? " G-" : ""
+          code = UI.input "Enter code#{prefix}:"
+          form.Pin = code
+          page = @agent.submit(form, form.buttons.first)
+          return page
+        elsif type == 4 then 
+          UI.user_error! "Google prompt is not supported as a two-step verification"
+        else
+          html = page.at("##{form_id}").to_html
+          UI.user_error! "Unknown challenge type \n\n#{html}"
+        end
 
-				sapisid_hash = generate_sapisid_hash(time, sapisid, origin)
-				sapisid_header = "SAPISIDHASH #{sapisid_hash}"
+        return nil
+      end
 
-				json_headers = {
-					'Authorization' => sapisid_header,
-					'Cookie' => cookie_header,
-					'X-Origin' => origin
-				}
+      def generate_sapisid_hash(time, sapisid, origin) 
+        to_hash = time.to_s + " " + sapisid + " " + origin.to_s
 
-				json_headers
-			end
+        hash = Digest::SHA1.hexdigest(to_hash)
+        sapisid_hash = time.to_s + "_" + hash
 
-			def apikey_request_json(path, method = :get, parameters = Hash.new, headers = Hash.new, query = '')
-					begin
-					if method == :get then
-						parameters["key"] = @api_key
-						page = @agent.get("#{@apikey_url}#{path}", parameters, nil, headers.merge(@authorization_headers))
-					elsif method == :post then
-						headers['Content-Type'] = 'application/json'
+        sapisid_hash
+      end
+
+      def create_authorization_headers 
+        @agent.cookie_jar.save_as '.cookies.yml', :session => true, :format => :yaml
+        cookie = @agent.cookie_jar.jar["google.com"]["/"]["SAPISID"]
+        sapisid = cookie.value
+        origin = @base_url
+        time = Time.now.to_i
+
+        sapisid_hash = generate_sapisid_hash(time, sapisid, origin)
+
+        cookies = @agent.cookie_jar.jar["google.com"]["/"].merge(@agent.cookie_jar.jar["console.firebase.google.com"]["/"])
+        cookie_header = cookies.map { |el, cookie| "#{el}=#{cookie.value}" }.join(";")
+
+        sapisid_hash = generate_sapisid_hash(time, sapisid, origin)
+        sapisid_header = "SAPISIDHASH #{sapisid_hash}"
+
+        json_headers = {
+          'Authorization' => sapisid_header,
+          'Cookie' => cookie_header,
+          'X-Origin' => origin
+        }
+
+        json_headers
+      end
+
+      def apikey_request_json(path, method = :get, parameters = Hash.new, headers = Hash.new, query = '')
+        begin
+          if method == :get then
+            parameters["key"] = @api_key
+            page = @agent.get("#{@apikey_url}#{path}", parameters, nil, headers.merge(@authorization_headers))
+          elsif method == :post then
+            headers['Content-Type'] = 'application/json'
             puts "#{@apikey_url}#{path}?key=#{@api_key}"
             puts parameters.to_json
-						page = @agent.post("#{@apikey_url}#{path}?key=#{@api_key}", parameters.to_json, headers.merge(@authorization_headers))
-					elsif method == :patch then
-						headers['Content-Type'] = 'application/json'
-						page = @agent.request_with_entity(
+            page = @agent.post("#{@apikey_url}#{path}?key=#{@api_key}", parameters.to_json, headers.merge(@authorization_headers))
+          elsif method == :patch then
+            headers['Content-Type'] = 'application/json'
+            page = @agent.request_with_entity(
               'patch', "#{@apikey_url}#{path}?key=#{@api_key}&#{query}", parameters.to_json, headers.merge(@authorization_headers)
             )
-					elsif method == :delete then
-						page = @agent.delete("#{@apikey_url}#{path}?key=#{@api_key}", parameters, headers.merge(@authorization_headers))
-					end
+          elsif method == :delete then
+            page = @agent.delete("#{@apikey_url}#{path}?key=#{@api_key}", parameters, headers.merge(@authorization_headers))
+          end
 
-					JSON.parse(page.body)
+          JSON.parse(page.body)
 
-					rescue Mechanize::ResponseCodeError => e
-						code = e.response_code.to_i
-						if code >= 400 && code < 500 then
-							if body = JSON.parse(e.page.body) then
-								raise BadRequestError.new(body["error"]["message"], code)
-							end
-						end
-						UI.crash! e.page.body
-					end
-			end
+        rescue Mechanize::ResponseCodeError => e
+          code = e.response_code.to_i
+          if code >= 400 && code < 500 then
+            if body = JSON.parse(e.page.body) then
+              raise BadRequestError.new(body["error"]["message"], code)
+            end
+          end
+          UI.crash! e.page.body
+        end
+      end
 
-			def request_json(path, method = :get, parameters = Hash.new, headers = Hash.new)
-					begin
-					if method == :get then
-						parameters["key"] = @api_key
-						page = @agent.get("#{@sdk_url}#{path}", parameters, nil, headers.merge(@authorization_headers))
-					elsif method == :post then
-						headers['Content-Type'] = 'application/json'
-						page = @agent.post("#{@sdk_url}#{path}?key=#{@api_key}", parameters.to_json, headers.merge(@authorization_headers))
-					elsif method == :delete then
-						page = @agent.delete("#{@sdk_url}#{path}?key=#{@api_key}", parameters, headers.merge(@authorization_headers))
-					end
+      def request_json(path, method = :get, parameters = Hash.new, headers = Hash.new)
+        begin
+          if method == :get then
+            parameters["key"] = @api_key
+            page = @agent.get("#{@sdk_url}#{path}", parameters, nil, headers.merge(@authorization_headers))
+          elsif method == :post then
+            headers['Content-Type'] = 'application/json'
+            page = @agent.post("#{@sdk_url}#{path}?key=#{@api_key}", parameters.to_json, headers.merge(@authorization_headers))
+          elsif method == :delete then
+            page = @agent.delete("#{@sdk_url}#{path}?key=#{@api_key}", parameters, headers.merge(@authorization_headers))
+          end
 
-					JSON.parse(page.body)
+          JSON.parse(page.body)
 
-					rescue Mechanize::ResponseCodeError => e
-						code = e.response_code.to_i
-						if code >= 400 && code < 500 then
-							if body = JSON.parse(e.page.body) then
-								raise BadRequestError.new(body["error"]["message"], code)
-							end
-						end
-						UI.crash! e.page.body
-					end
-			end
+        rescue Mechanize::ResponseCodeError => e
+          code = e.response_code.to_i
+          if code >= 400 && code < 500 then
+            if body = JSON.parse(e.page.body) then
+              raise BadRequestError.new(body["error"]["message"], code)
+            end
+          end
+          UI.crash! e.page.body
+        end
+      end
 
-			def project_list
-				UI.message "Retrieving project list"
-				json = request_json("v1/projects")
-				projects = json["project"] || []
-				UI.success "Found #{projects.count} projects"
-				projects
-			end
+      def project_list
+        UI.message "Retrieving project list"
+        json = request_json("v1/projects")
+        projects = json["project"] || []
+        UI.success "Found #{projects.count} projects"
+        projects
+      end
 
-			def add_client(project_number, type, bundle_id, app_name, ios_appstore_id )
-				parameters = {
-					"requestHeader" => { },
-					"displayName" => app_name || ""
-				}
+      def add_client(project_number, type, bundle_id, app_name, ios_appstore_id )
+        parameters = {
+          "requestHeader" => { },
+          "displayName" => app_name || ""
+        }
 
-				case type
-					when :ios
-						parameters["iosData"] = {
-							"bundleId" => bundle_id,
-							"iosAppStoreId" => ios_appstore_id || ""
-						}
-					when :android
-						parameters["androidData"] = {
-							"packageName" => bundle_id,
-							"androidCertificateHash" => []
-						}
-				end
+        case type
+        when :ios
+          parameters["iosData"] = {
+            "bundleId" => bundle_id,
+            "iosAppStoreId" => ios_appstore_id || ""
+          }
+        when :android
+          parameters["androidData"] = {
+            "packageName" => bundle_id,
+            "androidCertificateHash" => []
+          }
+        end
 
-				json = request_json("v1/projects/#{project_number}/clients", :post, parameters)
-				if client = json["client"] then
-					UI.success "Successfuly added client #{bundle_id}"
-					client
-				else
-					UI.error "Client could not be added"
-				end
-			end
+        json = request_json("v1/projects/#{project_number}/clients", :post, parameters)
+        if client = json["client"] then
+          UI.success "Successfuly added client #{bundle_id}"
+          client
+        else
+          UI.error "Client could not be added"
+        end
+      end
 
-			def delete_client(project_number, client_id)
-				json = request_json("v1/projects/#{project_number}/clients/#{client_id}", :delete)
-			end
+      def delete_client(project_number, client_id)
+        json = request_json("v1/projects/#{project_number}/clients/#{client_id}", :delete)
+      end
 
-			def upload_certificate(project_number, client_id, type, certificate_value, certificate_password)
-				
-				prefix = type == :development ? "debug" : "prod"
+      def upload_certificate(project_number, client_id, type, certificate_value, certificate_password)
 
-				parameters = {
-					"#{prefix}ApnsCertificate" => { 
-						"certificateValue" => certificate_value,
-						"apnsPassword" => certificate_password 
-					}
-				}
+        prefix = type == :development ? "debug" : "prod"
 
-				json = request_json("v1/projects/#{project_number}/clients/#{client_id}:setApnsCertificate", :post, parameters)
-			end
+        parameters = {
+          "#{prefix}ApnsCertificate" => { 
+            "certificateValue" => certificate_value,
+            "apnsPassword" => certificate_password 
+          }
+        }
 
-			def upload_p8_certificate(project_number, client_id, type, certificate_value, key_code)
+        json = request_json("v1/projects/#{project_number}/clients/#{client_id}:setApnsCertificate", :post, parameters)
+      end
 
-				parameters = {
-						"keyId" => key_code,
-						"privateKey" => certificate_value 
-					}
+      def upload_p8_certificate(project_number, client_id, type, certificate_value, key_code)
 
-			  json = request_json("v1/projects/#{project_number}/clients/#{client_id}:setApnsAuthKey", :post, parameters)
-			end
+        parameters = {
+          "keyId" => key_code,
+          "privateKey" => certificate_value 
+        }
 
-			def download_config_file(project_number, client_id)
-				
-				request = "[\"getArtifactRequest\",null,\"#{client_id}\",\"1\",\"#{project_number}\"]"
-				code = (client_id.start_with? "ios") ? "1" : "2"
-				url = @base_url + "/m/mobilesdk/projects/" + project_number + "/clients/" + CGI.escape(client_id) + "/artifacts/#{code}?param=" + CGI.escape(request)
-				UI.message "Downloading config file"
-				begin
-					config = @agent.get url
-					UI.success "Successfuly downloaded #{config.filename}"
-					config
-				rescue Mechanize::ResponseCodeError => e
-					UI.crash! e.page.body
-				end
-			end
+        json = request_json("v1/projects/#{project_number}/clients/#{client_id}:setApnsAuthKey", :post, parameters)
+      end
 
-			def add_team(project_number, bundle_id, team_id)
-				parameters = {
-					"iosTeamId" => team_id
-				}
+      def download_config_file(project_number, client_id, mobilesdk_app_id)
+        code = (client_id.start_with? "ios") ? "iosApps/#{mobilesdk_app_id}" : "androidApps/#{mobilesdk_app_id}"
+        url = @firebase_url + "/v1beta1/projects/#{project_number}/#{code}/config"
+        UI.message "Downloading config file"
+        begin
+          config = @agent.get(url, { key: @api_key }, nil, @authorization_headers)
+          JSON.parse(config.body)
+        rescue Mechanize::ResponseCodeError => e
+          UI.crash! e.page.body
+        end
+      end
 
-				json = request_json("v1/projects/#{project_number}/clients/ios:#{bundle_id}:setTeamId", :post, parameters)
-			end
+      def add_team(project_number, bundle_id, team_id)
+        parameters = {
+          "iosTeamId" => team_id
+        }
 
-			def add_android_certificate(project_number, bundle_id, sha256)
-				parameters = {
-					"requestHeader" => { "clientVersion" => "FIREBASE" },
-					"projectNumber" => project_number,
-					"clientId" => "android:#{bundle_id}",
-					"androidCertificate" => {
-						"androidSha256Hash" => sha256
-					}
-				}
+        json = request_json("v1/projects/#{project_number}/clients/ios:#{bundle_id}:setTeamId", :post, parameters)
+      end
 
-				json = request_json("v1/projects/#{project_number}/clients/android:#{bundle_id}:addAndroidCertificate", :post, parameters)
-			end
+      def add_android_certificate(project_number, bundle_id, sha256)
+        parameters = {
+          "requestHeader" => { "clientVersion" => "FIREBASE" },
+          "projectNumber" => project_number,
+          "clientId" => "android:#{bundle_id}",
+          "androidCertificate" => {
+            "androidSha256Hash" => sha256
+          }
+        }
 
-			def add_apple_store_id(project_number, bundle_id, store_id)
-				parameters = {
-					"requestHeader" => { "clientVersion" => "FIREBASE" },
-					"projectNumber" => project_number,
-					"clientId" => "android:#{bundle_id}",
-					iosAppStoreId: store_id
-				}
+        json = request_json("v1/projects/#{project_number}/clients/android:#{bundle_id}:addAndroidCertificate", :post, parameters)
+      end
 
-				json = request_json("v1/projects/#{project_number}/clients/ios:#{bundle_id}:setAppStoreId", :post, parameters)
-			end
+      def add_apple_store_id(project_number, bundle_id, store_id)
+        parameters = {
+          "requestHeader" => { "clientVersion" => "FIREBASE" },
+          "projectNumber" => project_number,
+          "clientId" => "android:#{bundle_id}",
+          iosAppStoreId: store_id
+        }
+
+        json = request_json("v1/projects/#{project_number}/clients/ios:#{bundle_id}:setAppStoreId", :post, parameters)
+      end
 
       def get_apikey(project_number, api_key)
-				json = apikey_request_json("v1/projects/#{project_number}/apiKeys/#{api_key}", :get)
+        json = apikey_request_json("v1/projects/#{project_number}/apiKeys/#{api_key}", :get)
       end
 
       def update_apikey(project_number, api_key, update_mask, payload)
@@ -377,9 +375,9 @@ module Fastlane
       end
 
       def get_server_key(project_number) 
-				parameters = {}
-				json = request_json("v1/projects/#{project_number}:getIidTokens", :post, parameters)
+        parameters = {}
+        json = request_json("v1/projects/#{project_number}:getIidTokens", :post, parameters)
       end
-		end
-	end
+    end
+  end
 end
