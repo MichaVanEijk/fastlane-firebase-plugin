@@ -14,6 +14,7 @@ module Fastlane
           key_info['iosKeyDetails']['allowedBundleIds'] << params[:bundle_id]
           api.update_apikey(params[:project_number], params[:api_key_id], 'apiTargetKeyDetails,iosKeyDetails', key_info)
         when 'android'
+          key_info['androidKeyDetails']['allowedApplications'].reject! { |application| application['packageName'] == params[:bundle_id] }
           key_info['androidKeyDetails']['allowedApplications'] << {
             packageName: params[:bundle_id],
             sha1Fingerprint: Base64.strict_encode64([params[:fingerprint].gsub(':','')].pack('H*'))
