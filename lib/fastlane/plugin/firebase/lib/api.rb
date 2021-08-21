@@ -164,6 +164,10 @@ module Fastlane
           form = page.forms.first
           form.Passwd = password
           return @agent.submit(form, form.buttons.first)
+        elsif type == 39 then
+          UI.confirm "Accept prompt on device"
+          form = page.forms.first
+          return @agent.submit(form, form.buttons.first)
         else
           html = page.at("##{form_id}").to_html
           UI.user_error! "Unknown challenge type \n\n#{html}"
