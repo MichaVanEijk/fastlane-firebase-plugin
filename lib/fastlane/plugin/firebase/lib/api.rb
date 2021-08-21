@@ -54,9 +54,13 @@ module Fastlane
           #Send
           page = @agent.submit(google_form, google_form.buttons.first)
 
-          #Second step - password
+          #Second step - password or captcha
           google_form = page.form()
-          google_form.Passwd = password
+          begin
+            google_form.Passwd = password
+          rescue
+            page = captcha_challenge(page, password)
+          end
 
           #Send
           page = @agent.submit(google_form, google_form.buttons.first)
@@ -71,7 +75,7 @@ module Fastlane
             if error = page.at("#errormsg_0_Passwd") then
               message = error.text.strip
             elsif page.xpath("//div[@class='captcha-img']").count > 0 then
-              page = captcha_challenge(page)
+              page = captcha_challenge(page, password)
               next
             elsif page.form.action.include? "/signin/challenge" then
               page = signin_challenge(page)
@@ -97,9 +101,9 @@ module Fastlane
         return false
       end
 
-      def captcha_challenge(page)
+      def captcha_challenge(page, password)
         if UI.confirm "To proceed you need to fill in captcha. Do you want to download captcha image?" then
-          img_src = page.xpath("//div[@class='captcha-img']/img").attribute("src").value
+          img_src = page.images.find { |image| image.alt == 'Visual verification' }.uri
           image = @agent.get(img_src)
           if image != nil then
             UI.success "Captcha image downloaded"
@@ -121,12 +125,10 @@ module Fastlane
           end
 
           captcha = UI.input "Enter captcha (case insensitive):"
-          password = UI.password "Re-enter password:"
 
           captcha_form = page.form()
 
-          captcha_form.logincaptcha = captcha
-          captcha_form.Passwd = password
+          captcha_form['identifier-captcha-input'] = captcha
 
           page = @agent.submit(captcha_form, captcha_form.buttons.first)
           return page
