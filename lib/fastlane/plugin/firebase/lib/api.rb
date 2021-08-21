@@ -78,7 +78,7 @@ module Fastlane
               page = captcha_challenge(page, password)
               next
             elsif page.form.action.include? "/signin/challenge" then
-              page = signin_challenge(page)
+              page = signin_challenge(page, password)
               next
             else 
               message = "Unknown error"
@@ -138,7 +138,7 @@ module Fastlane
 
       end
 
-      def signin_challenge(page)
+      def signin_challenge(page, password)
         UI.header "Sign-in challenge"
 
         form_id = "challenge"
@@ -160,6 +160,10 @@ module Fastlane
           return page
         elsif type == 4 then 
           UI.user_error! "Google prompt is not supported as a two-step verification"
+        elsif type == 1 then
+          form = page.forms.first
+          form.Passwd = password
+          return @agent.submit(form, form.buttons.first)
         else
           html = page.at("##{form_id}").to_html
           UI.user_error! "Unknown challenge type \n\n#{html}"
